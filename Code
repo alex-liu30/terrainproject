@@ -1,4 +1,4 @@
-@mrjoswald
+@mrjoswald 
 
 import Foundation
 import Cocoa
@@ -168,3 +168,5 @@ for waterLevel in 0...5 {
         print("Saved image for water level \(waterLevel) to \(fileName)")
     }
 }
+
+print("Simulation complete. Check the generated PNG files for visualizations of different water levels.")
