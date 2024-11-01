@@ -1,17 +1,19 @@
 @mrjoswald
 
-print("""
-Hello User! Welcome to Alex's Bay Area Flood Simulator! Unfortunately, due to rising water levels, the Bay Area has been flooded, and so disaster management experts and computational geographers have been looking for a way to model these changes so as to come up with a solution. Thus this code focuses on simulating the Bay Area flooding problem; hopefully the guys can use this code to get closer to finding a solution!
-
-----------------------------------------
-
-""")
-
 import Foundation
+import Cocoa
+import UniformTypeIdentifiers
 
 struct Point: Hashable {
     let x: Int
     let y: Int
+}
+
+struct PixelData {
+    var a: UInt8 = 255
+    var r: UInt8
+    var g: UInt8
+    var b: UInt8
 }
 
 struct TerrainData {
@@ -20,6 +22,16 @@ struct TerrainData {
     let waterSources: [Point]
     var elevations: [[Int]]
 }
+
+let floodColor = PixelData(r: 0, g: 49, b: 83)
+
+let colorList: [PixelData] = [
+    PixelData(r: 0, g: 102, b: 0),
+    PixelData(r: 154, g: 205, b: 50),
+    PixelData(r: 251, g: 236, b: 93),
+    PixelData(r: 212, g: 175, b: 55),
+    PixelData(r: 166, g: 60, b: 20),
+]
 
 func createSampleTerrain() -> TerrainData {
     let rows = 10
@@ -42,7 +54,7 @@ func createSampleTerrain() -> TerrainData {
     return TerrainData(rows: rows, columns: columns, waterSources: waterSources, elevations: elevations)
 }
 
-func simulateFlooding(terrain: inout TerrainData, waterLevel: Int) {
+func simulateFlooding(terrain: inout TerrainData, waterLevel: Int) -> Set<Point> {
     var floodedAreas = Set<Point>()
     
     // Start with water sources
@@ -73,34 +85,86 @@ func simulateFlooding(terrain: inout TerrainData, waterLevel: Int) {
         }
     }
     
-    // Update terrain with flooded areas
-    for point in floodedAreas {
-        terrain.elevations[point.y][point.x] = min(terrain.elevations[point.y][point.x], waterLevel)
+    return floodedAreas
+}
+
+func terrainToPixelData(terrain: TerrainData, floodedAreas: Set<Point>, waterLevel: Int) -> [PixelData] {
+    var pixelData = [PixelData](repeating: PixelData(r: 0, g: 0, b: 0), count: terrain.rows * terrain.columns)
+    
+    for y in 0..<terrain.rows {
+        for x in 0..<terrain.columns {
+            let index = y * terrain.columns + x
+            let point = Point(x: x, y: y)
+            
+            if floodedAreas.contains(point) {
+                pixelData[index] = floodColor
+            } else {
+                let elevation = terrain.elevations[y][x]
+                let colorIndex = min(elevation, colorList.count - 1)
+                pixelData[index] = colorList[colorIndex]
+            }
+        }
+    }
+    
+    return pixelData
+}
+
+extension CGImage {
+    var png: Data? {
+        let cfdata: CFMutableData = CFDataCreateMutable(nil, 0)
+        if let destination = CGImageDestinationCreateWithData(cfdata, UTType.png.identifier as CFString, 1, nil) {
+            CGImageDestinationAddImage(destination, self, nil)
+            if CGImageDestinationFinalize(destination) {
+                return cfdata as Data
+            }
+        }
+        return nil
     }
 }
 
-func printTerrain(_ terrain: TerrainData, waterLevel: Int) {
-    for row in 0..<terrain.rows {
-        for col in 0..<terrain.columns {
-            if terrain.elevations[row][col] <= waterLevel {
-                print("~", terminator: "")
-            } else {
-                print(terrain.elevations[row][col], terminator: "")
-            }
-        }
-        print()
+func pixelDataToImage(pixels: [PixelData], width: Int, height: Int) -> CGImage {
+    assert(pixels.count == width * height)
+    let bitsPerComponent: Int = 8
+    let bitsPerPixel: Int = 32
+    let rgbColorSpace = CGColorSpaceCreateDeviceRGB()
+    let bitmapInfo = CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedFirst.rawValue)
+
+    var data = pixels
+    guard let providerRef = CGDataProvider(data: NSData(bytes: &data, length: data.count * MemoryLayout<PixelData>.size)) else {
+        fatalError("CGDataProvider failure")
     }
-    print()
+    
+    guard let image = CGImage(
+        width: width,
+        height: height,
+        bitsPerComponent: bitsPerComponent,
+        bitsPerPixel: bitsPerPixel,
+        bytesPerRow: width * MemoryLayout<PixelData>.size,
+        space: rgbColorSpace,
+        bitmapInfo: bitmapInfo,
+        provider: providerRef,
+        decode: nil,
+        shouldInterpolate: true,
+        intent: .defaultIntent
+    ) else {
+        fatalError("CGImage failure")
+    }
+    
+    return image
 }
 
 // Main simulation
 var terrain = createSampleTerrain()
-print("Initial terrain:")
-printTerrain(terrain, waterLevel: -1)
 
 for waterLevel in 0...5 {
-    simulateFlooding(terrain: &terrain, waterLevel: waterLevel)
-    print("Water level: \(waterLevel)")
-    printTerrain(terrain, waterLevel: waterLevel)
+    let floodedAreas = simulateFlooding(terrain: &terrain, waterLevel: waterLevel)
+    let pixelData = terrainToPixelData(terrain: terrain, floodedAreas: floodedAreas, waterLevel: waterLevel)
+    let image = pixelDataToImage(pixels: pixelData, width: terrain.columns, height: terrain.rows)
+    
+    if let pngData = image.png {
+        let fileName = "flood_level_\(waterLevel).png"
+        let fileURL = URL(fileURLWithPath: fileName)
+        try? pngData.write(to: fileURL)
+        print("Saved image for water level \(waterLevel) to \(fileName)")
+    }
 }
-print("Here's my explanation of the tilde symbol which I thought was cool to mention: The tilde (~) symbol in swift represents water or flooded areas in the simulation. In \"five four three tilde tilde tilde tilde three's\" example, it shows a partially flooded area.\nThe numbers (integers) represent a cell's elevations above water level, so five would mean that cell has an elevation of five.\nThe tildes at the middle of the numbers indicate that those specific areas are underwater.\nThat specific tilde function shows that the four cells represnted by tildes are flooded, or underwater.\nSo, keeping this in mind, as the water level rises, lower numbers will be replaced by tildes which ultimately represents the spread of flooding.")
